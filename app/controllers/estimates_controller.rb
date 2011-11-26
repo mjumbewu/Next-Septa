@@ -76,8 +76,9 @@ class EstimatesController < ApplicationController
 
   def interpret_time(time_string)
     time_pieces = time_string.split(':')
+
     now = Time.now
-    time = Time.new(now.year, now.month, now.day, time_pieces[0].to_i, time_pieces[1].to_i, time_pieces[2].to_i)
+    time = Time.new(now.year, now.month, now.day, time_pieces[0].to_i % 24, time_pieces[1].to_i, time_pieces[2].to_i)
     if time < (now - 6.hours)
       time += 1.day
     end
