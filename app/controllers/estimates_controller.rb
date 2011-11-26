@@ -112,6 +112,6 @@ class EstimatesController < ApplicationController
       end
     end
 
-    return lateness / 60
+    return (lateness / 60).round
   end
 end

@@ -16,11 +16,11 @@
 				<time datetime="<%=st["departure_time"].to_formatted_s(:display_iso_time) %>"><%=st["departure_time"].to_formatted_s(:display_time) %></time>
 				<span data-time="<%=st["departure_time"] %>">(<%=st["from_now"] %>)</span>
 			</div>
-			<% if(st["arrival_stop_time"] != nil) %>
 			<div class="nxs-stoptime-right">
+    			<% if(st["arrival_stop_time"] != nil) %>
 				<time datetime="<%=st["arrival_time"].to_formatted_s(:display_iso_time) %>"><%=st["arrival_time"].to_formatted_s(:display_time) %></time>
+    			<% end %>
 			</div>
-			<% end %>
 			<div class="nxs-stoptime-aside">
 			</div>
 		</li>

@@ -3,7 +3,7 @@ var NextSepta = {};
 (function(NXS) {
 	NXS.Data = (function() {
 		var _d = {};
-		
+
 		function _ajax(url, type, data, success, error, customParams) {
 			if(data && typeof data === 'object') {
 				$.each(data, function(p, v) {
@@ -41,14 +41,14 @@ var NextSepta = {};
 
 	        return $.ajax(ajaxOpts);
 		}
-		
+
 		_d.get = function(url, success, error, params, customParams) {
 			_ajax(url, 'GET', params, success, error, customParams);
 		};
-		
+
 		return _d;
 	})();
-	
+
 	NXS.Manager = function(options) {
 		var _self = {},
 			_options = $.extend({
@@ -56,7 +56,7 @@ var NextSepta = {};
 				components: {}
 			}, options),
 			_state = {};
-		
+
 		function _resize() {
 			var $r = $('.nxs-resize');
 			if($r.length) {
@@ -64,7 +64,7 @@ var NextSepta = {};
 				$r.css('maxHeight', maxHeight);
 			}
 		}
-		
+
 		function _setupHistory() {
 			if(window.history && window.history.pushState) {
 				$('.nxs-hist-link').click(function() {
@@ -74,7 +74,7 @@ var NextSepta = {};
 				});
 			}
 		}
-		
+
 		_self.getPath = function(add) {
 			var path = '';
 			var pathNames = ['routeType', 'routeId', 'direction', 'from', 'to'];
@@ -90,12 +90,12 @@ var NextSepta = {};
 			}
 			return path;
 		};
-		
+
 		_self.init = function() {
 			//_resize();
-			
+
 			//_setupHistory();
-			
+
 			var $content = $('#content');
 			_state = {
 				routeType: $content.attr('data-type'),
@@ -104,20 +104,20 @@ var NextSepta = {};
 				from: $content.attr('data-from'),
 				to: $content.attr('data-to')
 			};
-			
+
 			$.each(_options.components, function(p, c) {
 				c.init(_self, _state);
 			});
-			
+
 			return _self;
 		};
-		
+
 		NXS._manager = _self;
 		NXS._components = _options.components;
-		
+
 		return _self;
 	};
-	
+
 	NXS.Stops = function(options) {
 		var _self = {},
 			_options = {
@@ -127,9 +127,9 @@ var NextSepta = {};
 			_manager,
 			_state,
 			_stops = [];
-		
+
 		var _intervals = [{ l:'week', s:604800 }, { l:'day', s:86400 }, { l:'hr', s:3600 }, { l:'min', s:60 }]
-		
+
 		function _getRelTime(diff) {
 			if(diff < 0) {
 				return '(GONE)';
@@ -150,7 +150,7 @@ var NextSepta = {};
 				return '(' + s + ')';
 			}
 		}
-		
+
 		function _timer() {
 			var now = new Date();
 			$.each(_stops, function(i, stop) {
@@ -163,7 +163,7 @@ var NextSepta = {};
 				}, 25000);
 			}
 		}
-		
+
 		function _updateRealTime(buses) {
 			$('.nxs-stoptime').each(function() {
 				var blockId = $(this).attr('data-block');
@@ -171,12 +171,16 @@ var NextSepta = {};
 					var bus = buses[blockId];
 					var mapUrl = _manager.getPath('map?ll=' + bus.lat + ',' + bus.lng);
 					$('.nxs-stoptime-aside', this).html('<a href="' + mapUrl + '">map</a>')
+
+                    var time_qualifier = (bus.lateness >= 0 ? 'late' : 'early');
+                    bus.lateness = Math.abs(bus.lateness);
+                    $('.nxs-stoptime-right', this).html('<span>(~' + bus.lateness + ' mins ' + time_qualifier + ')</span>')
 				}
 			});
 		}
-		
-		function _getRealTimeData(routeId) {
-			NXS.Data.get('/locations/' + routeId, function(resp) {
+
+		function _getRealTimeData(routeId, directionId) {
+			NXS.Data.get('/estimates/' + routeId + '/' + directionId, function(resp) {
 				var buses = {};
 				if(resp.bus) {
 					$.each(resp.bus, function(i, bus) {
@@ -186,15 +190,15 @@ var NextSepta = {};
 				_updateRealTime(buses);
 			});
 		}
-		
+
 		_self.init = function(manager, state) {
 			_manager = manager;
 			_state = state;
-			
+
 			$('.nxs-stoptime-left').each(function() {
 				var ts = $('time', this).attr('datetime'),
 					relText = $('span', this);
-					
+
 				if(ts) {
 					var dt = new Date(Date.parse(ts));
 					if(dt && !$.isNaN(dt)) {
@@ -202,17 +206,17 @@ var NextSepta = {};
 					}
 				}
 			});
-			
-			
+
+
 			if(_state.routeType === 'buses' && _state.routeId) {
-				_getRealTimeData(_state.routeId);	
+				_getRealTimeData(_state.routeId, _state.direction);
 			}
-			
+
 			_timer();
-			
+
 			return _self;
 		};
-		
+
 		return _self;
 	};
 })(NextSepta);
