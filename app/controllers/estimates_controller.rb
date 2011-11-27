@@ -15,6 +15,13 @@ class EstimatesController < ApplicationController
     stops = get_stops(route_direction)
 
     vehicles.each do |vehicle|
+      # Note that this loop will attempt to calculate lateness for _all_
+      # vehicles travelling in both directions, but that one of these
+      # directions is going to be the wrong one.  I'm not sure whethere there's
+      # a good way for us to know beforehand which direction we want.  Until
+      # that's worked out though, we'll get weird results like 45 minutes early
+      # because it's a vehicle on a block, but not yet travelling in the right
+      # direction.
       nearest_stop = get_nearest_stop(stops, vehicle)
       trips = get_scheduled_departure_times(route_direction, nearest_stop, vehicle, service_id)
       lateness = get_estimated_lateness(trips, vehicle)
