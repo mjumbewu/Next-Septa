@@ -32,27 +32,40 @@ class EstimatesController < ApplicationController
   end
 
   def get_real_time_locations(route_name)
+    # Get the real-time bus location data from SEPTA ad return the response as
+    # a JSON-interpreted hash.
+
     url = "http://www3.septa.org/transitview/bus_route_data/#{route_name}"
     resp = Resourceful.get(url)
     puts "***** The response is..."
     puts url
     puts resp.body
+
     return ActiveSupport::JSON.decode(resp.body)["bus"]
   end
 
   def get_route_direction(route_id, direction_id)
+    # Get the RouteDirection object that corresponds to the given Route ID and
+    # Direction ID.
+
     RouteDirection.select("*")
       .where("route_id = '#{route_id}' AND direction_id = '#{direction_id}'")
       .first
   end
 
   def get_stops(route_direction)
+    # Get all the Stop objects that fall along the given RouteDirection object.
+
     Stop.select("*")
       .joins("JOIN simplified_stops ss ON stops.stop_id = ss.stop_id")
       .where("ss.route_id = '#{route_direction.route_id}' AND ss.direction_id = '#{route_direction.direction_id}'")
   end
 
   def get_nearest_stop(stops, vehicle)
+    # Given a list of stops and a real-time vehicle object, determine which
+    # Stop is closest to the Vehicle at the time that the Vehicle's GPS was
+    # last polled.
+
     vehicle_lat = Float(vehicle["lat"])
     vehicle_lon = Float(vehicle["lng"])
 
@@ -71,6 +84,9 @@ class EstimatesController < ApplicationController
   end
 
   def get_scheduled_departure_times(route_direction, stop, vehicle, service_id)
+    # Get a collection of objects containing Trip data for the trips in the
+    # given Vehicle's block, as well as the departure time from the given Stop.
+
     block_id = vehicle["BlockID"]
     Trip.connection.execute("SELECT trips.*, st.departure_time FROM trips " +
                             "JOIN stop_times st ON st.trip_id = trips.trip_id " +
@@ -82,6 +98,10 @@ class EstimatesController < ApplicationController
   end
 
   def interpret_time(time_string)
+    # Given a string in the format 'HH:MM:SS', return a time object.  If the
+    # time is no more than 6 hours before the current time, use today's date as
+    # the time's date.  Otherwise, use tomorrow's date.
+
     time_pieces = time_string.split(':')
 
     now = Time.now
@@ -94,6 +114,15 @@ class EstimatesController < ApplicationController
   end
 
   def get_estimated_lateness(trips, vehicle)
+    # Get an estimate of how late the given vehicle according to the given trip
+    # data.
+    #
+    # NOTE: trips in this case is a collection of objects with trip data as
+    # well as a departure time from some stop (for more details, see
+    # get_scheduled_departure_time).  This function will use those departure
+    # times to determine which is the Trip nearest to the given Vehicle's real-
+    # time information.
+
     puts
     puts "trips #{trips}"
 
