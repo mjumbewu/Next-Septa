@@ -152,65 +152,30 @@ class EstimatesController < ApplicationController
     return (lateness / 60).round
   end
 
-  def levenshtein_distance(s, t)
-    # The following dynamic programming implementation is adapted from the pseudo-
-    # code on the Wikipedia page:
-    #
-    # http://en.wikipedia.org/wiki/Levenshtein_distance#Computing_Levenshtein_distance
-
-    # s is a string of length m
-    # t is a string of length n
-
-    # for all i and j, d[i,j] will hold the Levenshtein distance between
-    # the first i characters of s and the first j characters of t;
-    # note that d has (m+1)x(n+1) values
-    d = []
-
-    m = s.length
-    (m+1).times do |i|
-      d[i] = [i]  # the distance of any first string to an empty second string
-    end
-
-    n = t.length
-    (n+1).times do |j|
-      d[0][j] = j  # the distance of any second string to an empty first string
-    end
-
-    (n+1).times do |j|
-      next if j == 0
-
-      (m+1).times do |i|
-        next if i == 0
-
-        if s[i-1] == t[j-1]
-          d[i][j] = d[i-1][j-1]        # no operation required
-        else
-          d[i][j] = [
-                      d[i-1][j] + 1,   # a deletion
-                      d[i][j-1] + 1,   # an insertion
-                      d[i-1][j-1] + 1  # a substitution
-                    ].min
-        end
-
-      end  # m.times
-    end  # n.times
-
-    return d[m][n]
-  end
-
-  def levenshtein_differentness(s, t)
-    # Calculate the normalized differentness of two strings based on their
-    # levelshtein distance and the length of the longer string.  The value is
-    # between 0 (the lower bound on the L-distance) and 1 (since the upper
-    # bound on L-distance is the length of the longer string).
-    #
-    # Two completely different strings of the same length (no characters in
-    # common) will have a L-diff of 1.  If one of the strings is empty, the
-    # L-diff will be 1.
+  def jaccard_similarity(s, t)
+    # Calculate the similarity between the two given strings s and t using the
+    # Jaccard index -- the ratio of the number of similar characters in the
+    # strings to the total number of (unique) characters.
 
     return 0 if s.length == 0 && t.length == 0
 
-    dist = levenshtein_distance(s, t)
-    return dist / [s.length, t.length].max.to_f
+    similar_chars = ''
+    all_chars = ''
+
+    # Get the unique characters in common
+    s.each_char do |c|
+      if t.include? c and !similar_chars.include? c
+        similar_chars += c
+      end
+    end
+
+    # Get all the unique characters
+    (s+t).each_char do |c|
+      if !all_chars.include? c
+        all_chars += c
+      end
+    end
+
+    return similar_chars.length.to_f / all_chars.length.to_f
   end
 end
