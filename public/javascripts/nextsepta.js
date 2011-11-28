@@ -210,7 +210,7 @@ var NextSepta = {};
 			});
 
 
-			if(_state.routeType === 'buses' && _state.routeId) {
+			if((_state.routeType === 'buses' || _state.routeType === 'trolleys') && _state.routeId) {
 				_getRealTimeData(_state.routeId, _state.direction);
 			}
 
