@@ -13,19 +13,31 @@ class EstimatesController < ApplicationController
     vehicles = get_real_time_locations(route_name)
     route_direction = get_route_direction(route_id, direction_id)
     stops = get_stops(route_direction)
+    trips = get_route_trips(route_direction, service_id).to_ary
 
     vehicles.each do |vehicle|
-      # Note that this loop will attempt to calculate lateness for _all_
-      # vehicles travelling in both directions, but that one of these
-      # directions is going to be the wrong one.  I'm not sure whethere there's
-      # a good way for us to know beforehand which direction we want.  Until
-      # that's worked out though, we'll get weird results like 45 minutes early
-      # because it's a vehicle on a block, but not yet travelling in the right
-      # direction.
+      # Attempt to match each vehicle to a trip and calculate the lateness on
+      # on that trip.
       nearest_stop = get_nearest_stop(stops, vehicle)
-      trips = get_scheduled_departure_times(route_direction, nearest_stop, vehicle, service_id)
-      lateness = get_estimated_lateness(trips, vehicle)
-      vehicle["lateness"] = lateness if lateness != nil
+      departures = get_scheduled_departure_times(trips, nearest_stop)
+      trip, departure, lateness = get_estimated_lateness(trips, departures, vehicle)
+
+      if lateness != nil
+        vehicle["lateness"] = lateness
+
+        # It doesn't matter what block ID the vehicle _thought_ it belonged to;
+        # all the user will care about is which block the vehicle is closest to,
+        # so we reassign ("fudge") the block here.
+        vehicle["BlockID"] = trip.block_id
+
+        # The trip has now been associated with a vehicle, so remove it from the
+        # pool.
+        trips.delete trip
+
+        # Fill in some other potentially useful information
+        vehicle["expected"] = departure.departure_time
+        vehicle["nearest_stop"] = nearest_stop.stop_name
+      end
     end
 
     render :json => {"bus" => vehicles}
@@ -37,9 +49,6 @@ class EstimatesController < ApplicationController
 
     url = "http://www3.septa.org/transitview/bus_route_data/#{route_name}"
     resp = Resourceful.get(url)
-    puts "***** The response is..."
-    puts url
-    puts resp.body
 
     return ActiveSupport::JSON.decode(resp.body)["bus"]
   end
@@ -66,8 +75,8 @@ class EstimatesController < ApplicationController
     # Stop is closest to the Vehicle at the time that the Vehicle's GPS was
     # last polled.
 
-    vehicle_lat = Float(vehicle["lat"])
-    vehicle_lon = Float(vehicle["lng"])
+    vehicle_lat = vehicle["lat"].to_f
+    vehicle_lon = vehicle["lng"].to_f
 
     nearest_stop = nil
     distance = 10000000000000000000
@@ -83,18 +92,28 @@ class EstimatesController < ApplicationController
     return nearest_stop
   end
 
-  def get_scheduled_departure_times(route_direction, stop, vehicle, service_id)
-    # Get a collection of objects containing Trip data for the trips in the
-    # given Vehicle's block, as well as the departure time from the given Stop.
+  def get_route_trips(route_direction, service_id)
+    # Get a collection of objects containing Trip data for all the trips along
+    # a given route.
 
-    block_id = vehicle["BlockID"]
-    Trip.connection.execute("SELECT trips.*, st.departure_time FROM trips " +
-                            "JOIN stop_times st ON st.trip_id = trips.trip_id " +
-                            "WHERE st.stop_id = '#{stop.stop_id}' " +
-                            "  AND trips.route_id = '#{route_direction.route_id}' " +
-                            "  AND trips.direction_id = '#{route_direction.direction_id}' " +
-                            "  AND trips.block_id = '#{block_id}'" +
-                            "  AND trips.service_id = '#{service_id}'")
+    Trip.select("*")
+        .where("route_id = ? AND direction_id = ? AND service_id = ?",
+               route_direction.route_id, route_direction.direction_id,
+               service_id)
+  end
+
+  def get_scheduled_departure_times(trips, stop)
+    # Get a collection of StopTime objects for all the scheduled departure times
+    # from the given stop along the given trips.
+
+    trip_ids = []
+    trips.each do |trip|
+      trip_ids.push trip.trip_id
+    end
+
+    StopTime.select("departure_time, trip_id")
+        .where("stop_id = ? AND trip_id IN (?)", stop.stop_id, trip_ids)
+        .order("departure_time")
   end
 
   def interpret_time(time_string)
@@ -113,55 +132,52 @@ class EstimatesController < ApplicationController
     return time
   end
 
-  def get_estimated_lateness(trips, vehicle)
-    # Get an estimate of how late the given vehicle according to the given trip
-    # data.
-    #
-    # NOTE: trips in this case is a collection of objects with trip data as
-    # well as a departure time from some stop (for more details, see
-    # get_scheduled_departure_time).  This function will use those departure
-    # times to determine which is the Trip nearest to the given Vehicle's real-
-    # time information.
+  def get_estimated_lateness(trips, departures, vehicle)
+    # Get an estimate of how late the given vehicle is according to the given
+    # trip and stoptime data.  Use the departure times to determine which is the
+    # Trip nearest to the given Vehicle's real-time information.
 
-    puts
-    puts "trips #{trips}"
-
-    actual_time = Time.now - Integer(vehicle["Offset"]).minutes
-
-    puts "actual time #{actual_time}"
+    actual_time = Time.now - vehicle["Offset"].to_i.minutes
 
     nearest_trip = nil
+    nearest_departure = nil
     lateness = nil
 
-    trips.each do |trip|
-      next unless same_direction? trip, vehicle
+    departures.each do |departure|
+      # get the corresponding trip
+      trip = nil
+      trips.each do |t|
+        if t.trip_id == departure.trip_id
+          trip = t
+          break
+        end
+      end
 
-      scheduled_time = interpret_time(trip["departure_time"])
+      # skip this trip if it is not in the vehicle's direction of travel
+      next unless same_direction?(trip, vehicle)
 
-      puts "scheduled time #{scheduled_time}"
+      scheduled_time = interpret_time(departure.departure_time)
 
       current_lateness = actual_time - scheduled_time
 
-      puts "old lateness #{lateness}"
-      puts "current lateness #{current_lateness}"
-
-      if lateness != nil && current_lateness.abs < lateness.abs
+      if lateness == nil || current_lateness.abs < lateness.abs
         lateness = current_lateness
         nearest_trip = trip
+        nearest_departure = departure
       end
     end
 
-    return nil if lateness == nil
-    return (lateness / 60).round
+    return nil, nil if lateness == nil
+    return nearest_trip, nearest_departure, (lateness / 60).round
   end
 
   def same_direction?(trip, vehicle)
     # Return true if the Vehicle is (known to be) travelling in the direction
     # of the Trip.
 
-    similarity_threshold = 0.5
+    similarity_threshold = 0.8
 
-    similarity = jaccard_similarity(trip["trip_headsign"], vehicle["destination"])
+    similarity = jaccard_similarity(trip.trip_headsign, vehicle["destination"])
     return (similarity >= similarity_threshold)
   end
 
@@ -176,14 +192,14 @@ class EstimatesController < ApplicationController
     all_chars = ''
 
     # get the unique characters in common
-    s.each_char do |c|
-      if t.include? c and !similar_chars.include? c
+    s.downcase.each_char do |c|
+      if t.downcase.include? c and !similar_chars.include? c
         similar_chars += c
       end
     end
 
     # get all the unique characters
-    (s+t).each_char do |c|
+    (s+t).downcase.each_char do |c|
       if !all_chars.include? c
         all_chars += c
       end
