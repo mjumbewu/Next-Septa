@@ -25,7 +25,7 @@ class EstimatesController < ApplicationController
       nearest_stop = get_nearest_stop(stops, vehicle)
       trips = get_scheduled_departure_times(route_direction, nearest_stop, vehicle, service_id)
       lateness = get_estimated_lateness(trips, vehicle)
-      vehicle["lateness"] = lateness
+      vehicle["lateness"] = lateness if lateness != nil
     end
 
     render :json => {"bus" => vehicles}
@@ -131,9 +131,11 @@ class EstimatesController < ApplicationController
     puts "actual time #{actual_time}"
 
     nearest_trip = nil
-    lateness = 1000000000000000000000000
+    lateness = nil
 
     trips.each do |trip|
+      next unless same_direction? trip, vehicle
+
       scheduled_time = interpret_time(trip["departure_time"])
 
       puts "scheduled time #{scheduled_time}"
@@ -143,13 +145,24 @@ class EstimatesController < ApplicationController
       puts "old lateness #{lateness}"
       puts "current lateness #{current_lateness}"
 
-      if current_lateness.abs < lateness.abs
+      if lateness != nil && current_lateness.abs < lateness.abs
         lateness = current_lateness
         nearest_trip = trip
       end
     end
 
+    return nil if lateness == nil
     return (lateness / 60).round
+  end
+
+  def same_direction?(trip, vehicle)
+    # Return true if the Vehicle is (known to be) travelling in the direction
+    # of the Trip.
+
+    similarity_threshold = 0.5
+
+    similarity = jaccard_similarity(trip["trip_headsign"], vehicle["destination"])
+    return (similarity >= similarity_threshold)
   end
 
   def jaccard_similarity(s, t)
@@ -162,14 +175,14 @@ class EstimatesController < ApplicationController
     similar_chars = ''
     all_chars = ''
 
-    # Get the unique characters in common
+    # get the unique characters in common
     s.each_char do |c|
       if t.include? c and !similar_chars.include? c
         similar_chars += c
       end
     end
 
-    # Get all the unique characters
+    # get all the unique characters
     (s+t).each_char do |c|
       if !all_chars.include? c
         all_chars += c

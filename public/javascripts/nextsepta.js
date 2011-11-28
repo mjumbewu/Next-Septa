@@ -172,9 +172,11 @@ var NextSepta = {};
 					var mapUrl = _manager.getPath('map?ll=' + bus.lat + ',' + bus.lng);
 					$('.nxs-stoptime-aside', this).html('<a href="' + mapUrl + '">map</a>')
 
-                    var time_qualifier = (bus.lateness >= 0 ? 'late' : 'early');
-                    bus.lateness = Math.abs(bus.lateness);
-                    $('.nxs-stoptime-right', this).html('<span>(~' + bus.lateness + ' mins ' + time_qualifier + ')</span>')
+          if (bus.lateness) {
+						var time_qualifier = (bus.lateness >= 0 ? 'late' : 'early');
+						bus.lateness = Math.abs(bus.lateness);
+						$('.nxs-stoptime-right', this).html('<span>(~' + bus.lateness + ' mins ' + time_qualifier + ')</span>')
+					}
 				}
 			});
 		}
