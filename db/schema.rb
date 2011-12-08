@@ -10,7 +10,7 @@
 #
 # It's strongly recommended to check this file into your version control system.
 
-ActiveRecord::Schema.define(:version => 20110905021855) do
+ActiveRecord::Schema.define(:version => 20111208215313) do
 
   create_table "route_directions", :force => true do |t|
     t.integer  "route_id"
@@ -53,15 +53,6 @@ ActiveRecord::Schema.define(:version => 20110905021855) do
 
   add_index "simplified_stops", ["route_direction_id"], :name => "index_simplified_stops_on_route_direction_id"
   add_index "simplified_stops", ["stop_id"], :name => "index_simplified_stops_on_stop_id"
-
-  create_table "simplified_trips", :force => true do |t|
-    t.string   "trip_name"
-    t.integer  "route_id"
-    t.datetime "created_at"
-    t.datetime "updated_at"
-  end
-
-  add_index "simplified_trips", ["route_id"], :name => "index_simplified_trips_on_route_id"
 
   create_table "stop_times", :force => true do |t|
     t.string   "trip_id"
@@ -107,5 +98,20 @@ ActiveRecord::Schema.define(:version => 20110905021855) do
 
   add_index "trips", ["route_id"], :name => "index_trips_on_route_id"
   add_index "trips", ["trip_id"], :name => "index_trips_on_trip_id"
+
+  create_table "vehicles", :force => true do |t|
+    t.decimal  "vehicle_lat"
+    t.decimal  "vehicle_lon"
+    t.string   "vehicle_label"
+    t.integer  "vehicle_id"
+    t.integer  "block_id"
+    t.string   "vehicle_direction"
+    t.string   "trip_headsign"
+    t.datetime "gps_poll_time"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+  end
+
+  add_index "vehicles", ["vehicle_id"], :name => "index_vehicles_on_vehicle_id"
 
 end
