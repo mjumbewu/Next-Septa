@@ -10,10 +10,12 @@ class EstimatesController < ApplicationController
     route_name = @route.route_short_name
     direction_id = params[:direction]
 
-    vehicles = get_real_time_locations(route_name)
+    vehicles = get_real_time_locations(route_id, route_name)
     route_direction = get_route_direction(route_id, direction_id)
     stops = get_stops(route_direction)
     trips = get_route_trips(route_direction, service_id).to_ary
+
+    vehicles_data = []
 
     vehicles.each do |vehicle|
       # Attempt to match each vehicle to a trip and calculate the lateness on
@@ -22,35 +24,74 @@ class EstimatesController < ApplicationController
       departures = get_scheduled_departure_times(trips, nearest_stop)
       trip, departure, lateness = get_estimated_lateness(trips, departures, vehicle)
 
+      vehicle_data = {
+        :lat => vehicle.vehicle_lat,
+        :lng => vehicle.vehicle_lon,
+        :label => vehicle.vehicle_label,
+        :VehicleID => vehicle.vehicle_id,
+        :Direction => vehicle.vehicle_direction,
+        :destination => vehicle.trip_headsign,
+        :gps_poll_time => vehicle.gps_poll_time
+      }
+
       if lateness != nil
-        vehicle["lateness"] = lateness
+        vehicle_data[:lateness] = lateness
 
         # It doesn't matter what block ID the vehicle _thought_ it belonged to;
         # all the user will care about is which block the vehicle is closest to,
         # so we reassign ("fudge") the block here.
-        vehicle["BlockID"] = trip.block_id
+        vehicle_data[:BlockID] = trip.block_id
 
         # The trip has now been associated with a vehicle, so remove it from the
         # pool.
         trips.delete trip
 
         # Fill in some other potentially useful information
-        vehicle["expected"] = departure.departure_time
-        vehicle["nearest_stop"] = nearest_stop.stop_name
+        vehicle_data[:expected] = departure.departure_time
+        vehicle_data[:nearest_stop] = nearest_stop.stop_name
       end
+
+      vehicles_data.push vehicle_data
     end
 
-    render :json => {"bus" => vehicles}
+    render :json => {"bus" => vehicles_data}
   end
 
-  def get_real_time_locations(route_name)
+  def get_real_time_locations(route_id, route_name)
     # Get the real-time bus location data from SEPTA ad return the response as
     # a JSON-interpreted hash.
 
     url = "http://www3.septa.org/transitview/bus_route_data/#{route_name}"
     resp = Resourceful.get(url)
 
-    return ActiveSupport::JSON.decode(resp.body)["bus"]
+    vehicles_data = ActiveSupport::JSON.decode(resp.body)["bus"]
+
+    # Store the vehicles
+    vehicle_ids = vehicles_data.collect {|data| data["VehicleID"] }
+    vehicles = Vehicle.select("*")
+      .where("vehicle_id in (?)", vehicle_ids)
+
+    Vehicle.transaction do
+      vehicles_data.each do |vehicle_data|
+        vehicle_id = vehicle_data["VehicleID"].to_i
+
+        vehicle_index = vehicles.index { |v| v.vehicle_id == vehicle_id }
+        if vehicle_index == nil
+          vehicle = Vehicle.new(:route_id => route_id, :vehicle_id => vehicle_id)
+        else
+          vehicle = vehicles[vehicle_index]
+        end
+
+        vehicle.update_realtime!(vehicle_data)
+      end
+    end  # transaction
+
+    # Now that we have these stored, pull the cached values out and use those.
+    # This might explode after a while, so we might want to time-box it.
+    vehicles = Vehicle.select("*")
+      .where("route_id = ? AND gps_poll_time >= ?", route_id, Time.now - 30.minutes)
+
+    return vehicles
   end
 
   def get_route_direction(route_id, direction_id)
@@ -75,15 +116,13 @@ class EstimatesController < ApplicationController
     # Stop is closest to the Vehicle at the time that the Vehicle's GPS was
     # last polled.
 
-    vehicle_lat = vehicle["lat"].to_f
-    vehicle_lon = vehicle["lng"].to_f
-
     nearest_stop = nil
-    distance = 10000000000000000000
+    distance = nil
 
     stops.each do |stop|
-      current_distance = Math.sqrt((vehicle_lat - stop.stop_lat)**2 + (vehicle_lon - stop.stop_lon)**2)
-      if current_distance < distance
+      current_distance = Math.sqrt((vehicle.vehicle_lat - stop.stop_lat)**2 +
+                                   (vehicle.vehicle_lon - stop.stop_lon)**2)
+      if distance == nil or current_distance < distance
         nearest_stop = stop
         distance = current_distance
       end
@@ -121,12 +160,32 @@ class EstimatesController < ApplicationController
     # time is no more than 6 hours before the current time, use today's date as
     # the time's date.  Otherwise, use tomorrow's date.
 
-    time_pieces = time_string.split(':')
+    time_hour, time_minute, time_second = time_string.split(':').map {|piece| piece.to_i }
 
-    now = Time.now
-    time = Time.new(now.year, now.month, now.day, time_pieces[0].to_i % 24, time_pieces[1].to_i, time_pieces[2].to_i)
-    if time < (now - 6.hours)
+    # Be sure to always interpret in eastern time.
+    eastern_offset = (Time.now.isdst ? -4 : -5).hours
+    local_offset = (Time.now.utc_offset - eastern_offset)
+
+    # We want the year, month, and day from the current time, but expressed as
+    # eastern time.  Take now and subtract the offset to get the correct day.
+    now = Time.now - local_offset
+
+    # Ruby is going to construct the time in the local zone, so offset it to
+    # eastern.  For example, if we have 14:30:00 and our servers are in
+    # California, Ruby will say it's 2:30 Pacific when we really want 2:30
+    # Eastern.  Add the offset.
+    time = Time.new(now.year, now.month, now.day, time_hour % 24, time_minute, time_second) + local_offset
+
+    # If the hour is after midnight but before 6am, and we're currently after
+    # 6pm, move the interpretation forward one day.
+    if now.hour >= 18 && time_hour >= 24 && time_hour < 6
       time += 1.day
+    end
+
+    # If the hour is before midnight but after 6pm, and we're currently before
+    # 6am, move the interpretation back one day.
+    if now.hour < 6 && time_hour < 24 && time_hour >= 18
+      time -= 1.day
     end
 
     return time
@@ -137,7 +196,7 @@ class EstimatesController < ApplicationController
     # trip and stoptime data.  Use the departure times to determine which is the
     # Trip nearest to the given Vehicle's real-time information.
 
-    actual_time = Time.now - vehicle["Offset"].to_i.minutes
+    actual_time = vehicle.gps_poll_time
 
     nearest_trip = nil
     nearest_departure = nil
@@ -145,13 +204,8 @@ class EstimatesController < ApplicationController
 
     departures.each do |departure|
       # get the corresponding trip
-      trip = nil
-      trips.each do |t|
-        if t.trip_id == departure.trip_id
-          trip = t
-          break
-        end
-      end
+      trip_index = trips.index {|t| t.trip_id == departure.trip_id }
+      trip = trips[trip_index]
 
       # skip this trip if it is not in the vehicle's direction of travel
       next unless same_direction?(trip, vehicle)
@@ -160,15 +214,18 @@ class EstimatesController < ApplicationController
 
       current_lateness = actual_time - scheduled_time
 
-      if lateness == nil || current_lateness.abs < lateness.abs
+      if lateness == nil or current_lateness.abs < lateness.abs
         lateness = current_lateness
         nearest_trip = trip
         nearest_departure = departure
       end
     end
 
-    return nil, nil if lateness == nil
-    return nearest_trip, nearest_departure, (lateness / 60).round
+    if lateness == nil
+      return nil, nil, nil
+    else
+      return nearest_trip, nearest_departure, (lateness / 60).round
+    end
   end
 
   def same_direction?(trip, vehicle)
@@ -177,7 +234,7 @@ class EstimatesController < ApplicationController
 
     similarity_threshold = 0.8
 
-    similarity = jaccard_similarity(trip.trip_headsign, vehicle["destination"])
+    similarity = jaccard_similarity(trip.trip_headsign, vehicle.trip_headsign)
     return (similarity >= similarity_threshold)
   end
 
@@ -186,7 +243,7 @@ class EstimatesController < ApplicationController
     # Jaccard index -- the ratio of the number of similar characters in the
     # strings to the total number of (unique) characters.
 
-    return 0 if s.length == 0 && t.length == 0
+    return 0 if s == nil || t == nil || (s.length == 0 && t.length == 0)
 
     similar_chars = ''
     all_chars = ''
