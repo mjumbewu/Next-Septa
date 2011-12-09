@@ -29,7 +29,7 @@ class EstimatesController < ApplicationController
         :lng => vehicle.vehicle_lon,
         :label => vehicle.vehicle_label,
         :VehicleID => vehicle.vehicle_id,
-        :direction => vehicle.vehicle_direction,
+        :Direction => vehicle.vehicle_direction,
         :destination => vehicle.trip_headsign,
         :gps_poll_time => vehicle.gps_poll_time
       }
@@ -89,7 +89,7 @@ class EstimatesController < ApplicationController
     # Now that we have these stored, pull the cached values out and use those.
     # This might explode after a while, so we might want to time-box it.
     vehicles = Vehicle.select("*")
-      .where("route_id = ?", route_id)
+      .where("route_id = ? AND gps_poll_time >= ?", route_id, Time.now - 30.minutes)
 
     return vehicles
   end
@@ -160,12 +160,32 @@ class EstimatesController < ApplicationController
     # time is no more than 6 hours before the current time, use today's date as
     # the time's date.  Otherwise, use tomorrow's date.
 
-    time_pieces = time_string.split(':')
+    time_hour, time_minute, time_second = time_string.split(':').map {|piece| piece.to_i }
 
-    now = Time.now
-    time = Time.new(now.year, now.month, now.day, time_pieces[0].to_i % 24, time_pieces[1].to_i, time_pieces[2].to_i)
-    if time < (now - 6.hours)
+    # Be sure to always interpret in eastern time.
+    eastern_offset = (Time.now.isdst ? -4 : -5).hours
+    local_offset = (Time.now.utc_offset - eastern_offset)
+
+    # We want the year, month, and day from the current time, but expressed as
+    # eastern time.  Take now and subtract the offset to get the correct day.
+    now = Time.now - local_offset
+
+    # Ruby is going to construct the time in the local zone, so offset it to
+    # eastern.  For example, if we have 14:30:00 and our servers are in
+    # California, Ruby will say it's 2:30 Pacific when we really want 2:30
+    # Eastern.  Add the offset.
+    time = Time.new(now.year, now.month, now.day, time_hour % 24, time_minute, time_second) + local_offset
+
+    # If the hour is after midnight but before 6am, and we're currently after
+    # 6pm, move the interpretation forward one day.
+    if now.hour >= 18 && time_hour >= 24 && time_hour < 6
       time += 1.day
+    end
+
+    # If the hour is before midnight but after 6pm, and we're currently before
+    # 6am, move the interpretation back one day.
+    if now.hour < 6 && time_hour < 24 && time_hour >= 18
+      time -= 1.day
     end
 
     return time
@@ -184,13 +204,8 @@ class EstimatesController < ApplicationController
 
     departures.each do |departure|
       # get the corresponding trip
-      trip = nil
-      trips.each do |t|
-        if t.trip_id == departure.trip_id
-          trip = t
-          break
-        end
-      end
+      trip_index = trips.index {|t| t.trip_id == departure.trip_id }
+      trip = trips[trip_index]
 
       # skip this trip if it is not in the vehicle's direction of travel
       next unless same_direction?(trip, vehicle)
@@ -206,8 +221,11 @@ class EstimatesController < ApplicationController
       end
     end
 
-    return nil, nil if lateness == nil
-    return nearest_trip, nearest_departure, (lateness / 60).round
+    if lateness == nil
+      return nil, nil, nil
+    else
+      return nearest_trip, nearest_departure, (lateness / 60).round
+    end
   end
 
   def same_direction?(trip, vehicle)
