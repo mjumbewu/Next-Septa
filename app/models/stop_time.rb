@@ -8,7 +8,10 @@ class StopTime < ActiveRecord::Base
 
     depart_time = Time.parse(d_time)
 
-    from_now = time_period_to_s depart_time - Time.now
+    eastern_offset = (Time.now.isdst ? -4 : -5).hours
+    local_offset = (depart_time.utc_offset - eastern_offset)
+
+    from_now = time_period_to_s depart_time - Time.now + local_offset
 
     if(to_stop != nil)
       to_stop_time = StopTime.where("trip_id = '#{self.trip_id}' AND stop_id = #{to_stop.stop_id}").first
