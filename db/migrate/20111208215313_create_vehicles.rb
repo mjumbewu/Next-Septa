@@ -6,6 +6,7 @@ class CreateVehicles < ActiveRecord::Migration
       t.string :vehicle_label
       t.integer :vehicle_id
       t.integer :block_id
+      t.integer :route_id
       t.string :vehicle_direction
       t.string :trip_headsign
       t.datetime :gps_poll_time

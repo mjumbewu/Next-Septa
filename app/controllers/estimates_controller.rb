@@ -10,10 +10,12 @@ class EstimatesController < ApplicationController
     route_name = @route.route_short_name
     direction_id = params[:direction]
 
-    vehicles = get_real_time_locations(route_name)
+    vehicles = get_real_time_locations(route_id, route_name)
     route_direction = get_route_direction(route_id, direction_id)
     stops = get_stops(route_direction)
     trips = get_route_trips(route_direction, service_id).to_ary
+
+    vehicles_data = []
 
     vehicles.each do |vehicle|
       # Attempt to match each vehicle to a trip and calculate the lateness on
@@ -22,35 +24,74 @@ class EstimatesController < ApplicationController
       departures = get_scheduled_departure_times(trips, nearest_stop)
       trip, departure, lateness = get_estimated_lateness(trips, departures, vehicle)
 
+      vehicle_data = {
+        :lat => vehicle.vehicle_lat,
+        :lng => vehicle.vehicle_lon,
+        :label => vehicle.vehicle_label,
+        :VehicleID => vehicle.vehicle_id,
+        :direction => vehicle.vehicle_direction,
+        :destination => vehicle.trip_headsign,
+        :gps_poll_time => vehicle.gps_poll_time
+      }
+
       if lateness != nil
-        vehicle["lateness"] = lateness
+        vehicle_data[:lateness] = lateness
 
         # It doesn't matter what block ID the vehicle _thought_ it belonged to;
         # all the user will care about is which block the vehicle is closest to,
         # so we reassign ("fudge") the block here.
-        vehicle["BlockID"] = trip.block_id
+        vehicle_data[:BlockID] = trip.block_id
 
         # The trip has now been associated with a vehicle, so remove it from the
         # pool.
         trips.delete trip
 
         # Fill in some other potentially useful information
-        vehicle["expected"] = departure.departure_time
-        vehicle["nearest_stop"] = nearest_stop.stop_name
+        vehicle_data[:expected] = departure.departure_time
+        vehicle_data[:nearest_stop] = nearest_stop.stop_name
       end
+
+      vehicles_data.push vehicle_data
     end
 
-    render :json => {"bus" => vehicles}
+    render :json => {"bus" => vehicles_data}
   end
 
-  def get_real_time_locations(route_name)
+  def get_real_time_locations(route_id, route_name)
     # Get the real-time bus location data from SEPTA ad return the response as
     # a JSON-interpreted hash.
 
     url = "http://www3.septa.org/transitview/bus_route_data/#{route_name}"
     resp = Resourceful.get(url)
 
-    return ActiveSupport::JSON.decode(resp.body)["bus"]
+    vehicles_data = ActiveSupport::JSON.decode(resp.body)["bus"]
+
+    # Store the vehicles
+    vehicle_ids = vehicles_data.collect {|data| data["VehicleID"] }
+    vehicles = Vehicle.select("*")
+      .where("vehicle_id in (?)", vehicle_ids)
+
+    Vehicle.transaction do
+      vehicles_data.each do |vehicle_data|
+        vehicle_id = vehicle_data["VehicleID"].to_i
+
+        vehicle_index = vehicles.index { |v| v.vehicle_id == vehicle_id }
+        if vehicle_index == nil
+          vehicle = Vehicle.new(:route_id => route_id, :vehicle_id => vehicle_id)
+        else
+          vehicle = vehicles[vehicle_index]
+        end
+
+        vehicle.update_realtime!(vehicle_data)
+      end
+    end  # transaction
+
+    # Now that we have these stored, pull the cached values out and use those.
+    # This might explode after a while, so we might want to time-box it.
+    vehicles = Vehicle.select("*")
+      .where("route_id = ?", route_id)
+
+    return vehicles
   end
 
   def get_route_direction(route_id, direction_id)
@@ -75,15 +116,13 @@ class EstimatesController < ApplicationController
     # Stop is closest to the Vehicle at the time that the Vehicle's GPS was
     # last polled.
 
-    vehicle_lat = vehicle["lat"].to_f
-    vehicle_lon = vehicle["lng"].to_f
-
     nearest_stop = nil
-    distance = 10000000000000000000
+    distance = nil
 
     stops.each do |stop|
-      current_distance = Math.sqrt((vehicle_lat - stop.stop_lat)**2 + (vehicle_lon - stop.stop_lon)**2)
-      if current_distance < distance
+      current_distance = Math.sqrt((vehicle.vehicle_lat - stop.stop_lat)**2 +
+                                   (vehicle.vehicle_lon - stop.stop_lon)**2)
+      if distance == nil or current_distance < distance
         nearest_stop = stop
         distance = current_distance
       end
@@ -137,7 +176,7 @@ class EstimatesController < ApplicationController
     # trip and stoptime data.  Use the departure times to determine which is the
     # Trip nearest to the given Vehicle's real-time information.
 
-    actual_time = Time.now - vehicle["Offset"].to_i.minutes
+    actual_time = vehicle.gps_poll_time
 
     nearest_trip = nil
     nearest_departure = nil
@@ -160,7 +199,7 @@ class EstimatesController < ApplicationController
 
       current_lateness = actual_time - scheduled_time
 
-      if lateness == nil || current_lateness.abs < lateness.abs
+      if lateness == nil or current_lateness.abs < lateness.abs
         lateness = current_lateness
         nearest_trip = trip
         nearest_departure = departure
@@ -177,7 +216,7 @@ class EstimatesController < ApplicationController
 
     similarity_threshold = 0.8
 
-    similarity = jaccard_similarity(trip.trip_headsign, vehicle["destination"])
+    similarity = jaccard_similarity(trip.trip_headsign, vehicle.trip_headsign)
     return (similarity >= similarity_threshold)
   end
 
@@ -186,7 +225,7 @@ class EstimatesController < ApplicationController
     # Jaccard index -- the ratio of the number of similar characters in the
     # strings to the total number of (unique) characters.
 
-    return 0 if s.length == 0 && t.length == 0
+    return 0 if s == nil || t == nil || (s.length == 0 && t.length == 0)
 
     similar_chars = ''
     all_chars = ''

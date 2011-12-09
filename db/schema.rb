@@ -105,6 +105,7 @@ ActiveRecord::Schema.define(:version => 20111208215313) do
     t.string   "vehicle_label"
     t.integer  "vehicle_id"
     t.integer  "block_id"
+    t.integer  "route_id"
     t.string   "vehicle_direction"
     t.string   "trip_headsign"
     t.datetime "gps_poll_time"
