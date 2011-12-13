@@ -6,12 +6,10 @@ class StopTime < ActiveRecord::Base
       d_time = "0" + (d_time_parts[0].to_i - 24).to_s + ":" + d_time_parts[1] + ":00"
     end
 
-    depart_time = Time.parse(d_time)
+    depart_time = Time.zone.parse(d_time)
+    now = Time.zone.now
 
-    eastern_offset = (Time.now.isdst ? -4 : -5).hours
-    local_offset = (depart_time.utc_offset - eastern_offset)
-
-    from_now = time_period_to_s depart_time - Time.now + local_offset
+    from_now = time_period_to_s depart_time - now
 
     if(to_stop != nil)
       to_stop_time = StopTime.where("trip_id = '#{self.trip_id}' AND stop_id = #{to_stop.stop_id}").first
