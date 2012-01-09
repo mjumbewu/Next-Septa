@@ -66,7 +66,11 @@ class EstimatesController < ApplicationController
 
     vehicles_data = ActiveSupport::JSON.decode(resp.body)["bus"]
 
-    # Store the vehicles
+    # Store the vehicles.  Grab the ones that are already in the database that
+    # have the same vehicle number (do it all at once instead of separately for
+    # each vehicle).  Then we'll just update these ones instead of saving over
+    # them (the new data might be missing some values).  This is like
+    # get_or_create in Django.
     vehicle_ids = vehicles_data.collect {|data| data["VehicleID"] }
     vehicles = Vehicle.select("*")
       .where("vehicle_id in (?)", vehicle_ids)
@@ -87,7 +91,7 @@ class EstimatesController < ApplicationController
     end  # transaction
 
     # Now that we have these stored, pull the cached values out and use those.
-    # This might explode after a while, so we might want to time-box it.
+    # This might explode after a while, so we time-box it.
     vehicles = Vehicle.select("*")
       .where("route_id = ? AND gps_poll_time >= ?", route_id, Time.now - 30.minutes)
 
@@ -232,10 +236,25 @@ class EstimatesController < ApplicationController
     # Return true if the Vehicle is (known to be) travelling in the direction
     # of the Trip.
 
-    similarity_threshold = 0.8
+    #####
+    # This bit uses the destination/trip_headsign to check direction.
+#    similarity_threshold = 0.8
+#
+#    similarity = jaccard_similarity(trip.trip_headsign, vehicle.trip_headsign)
+#    return (similarity >= similarity_threshold)
+    #####
 
-    similarity = jaccard_similarity(trip.trip_headsign, vehicle.trip_headsign)
-    return (similarity >= similarity_threshold)
+    #####
+    # Sometimes (often?) the headsign is an empty string.  That's not helpful.
+    # Sometimes the headsign says something other than what you'd expect, like
+    # when a route is diverted.  That's also not always helpful.
+    # So, here, we use the Direction/direction_id to check direction instead.
+    puts trip.direction_id
+    puts vehicle.vehicle_direction
+    puts
+    return (trip.direction_id.to_i == 0 && (vehicle.vehicle_direction == 'NorthBound' || vehicle.vehicle_direction == 'EastBound')) ||
+           (trip.direction_id.to_i == 1 && (vehicle.vehicle_direction == 'SouthBound' || vehicle.vehicle_direction == 'WestBound'))
+    #####
   end
 
   def jaccard_similarity(s, t)
