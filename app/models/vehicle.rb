@@ -10,11 +10,13 @@ class Vehicle < ActiveRecord::Base
 
     # For the rest of the stuff, set if the data is not empty.  Otherwise,
     # don't set, in case you're going to overwrite data.
-    self.vehicle_label = data["label"] unless data["label"] == '' or self.vehicle_label
-    self.vehicle_direction = (data["Direction"] unless data["Direction"] == ' ') or self.vehicle_direction
+    self.vehicle_label = (data["label"] unless data["label"].strip == '') or self.vehicle_label
+
+    directions = ['NorthBound', 'EastBound', 'SouthBound', 'WestBound']
+    self.vehicle_direction = (data["Direction"] if directions.include? data["Direction"]) or self.vehicle_direction
 
     self.block_id = data["BlockID"]
-    self.trip_headsign = (data["destination"] unless data["destination"] == '') or self.trip_headsign or ''
+    self.trip_headsign = (data["destination"] unless data["destination"].strip == '') or self.trip_headsign or ''
     self.gps_poll_time = Time.now - data["Offset"].to_i.minutes
 
     self.save
