@@ -41,6 +41,7 @@ class EstimatesController < ApplicationController
         # all the user will care about is which block the vehicle is closest to,
         # so we reassign ("fudge") the block here.
         vehicle_data[:BlockID] = trip.block_id
+        vehicle_data[:TripID] = trip.id
 
         # The trip has now been associated with a vehicle, so remove it from the
         # pool.

@@ -166,9 +166,9 @@ var NextSepta = {};
 
 		function _updateRealTime(buses) {
 			$('.nxs-stoptime').each(function() {
-				var blockId = $(this).attr('data-block');
-				if(blockId && blockId in buses) {
-					var bus = buses[blockId];
+				var tripId = $(this).attr('data-trip');
+				if(tripId && tripId in buses) {
+					var bus = buses[tripId];
 					var mapUrl = _manager.getPath('map?ll=' + bus.lat + ',' + bus.lng);
 					$('.nxs-stoptime-aside', this).html('<a href="' + mapUrl + '">map</a>')
 
@@ -186,7 +186,7 @@ var NextSepta = {};
 				var buses = {};
 				if(resp.bus) {
 					$.each(resp.bus, function(i, bus) {
-						buses[bus.BlockID] = bus;
+						buses[bus.TripID] = bus;
 					});
 				}
 				_updateRealTime(buses);

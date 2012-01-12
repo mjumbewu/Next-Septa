@@ -12,7 +12,7 @@ class StopsController < ApplicationController
 
     # The local server time may not be eastern, and Time.now is going to give
     # local server time, so be sure to use Time.zone.now.
-    c_time = Time.zone.now.to_formatted_s(:compare_time)
+    c_time = (Time.zone.now - 15.minutes).to_formatted_s(:compare_time)
 
     stop_times = StopTime.select("DISTINCT stop_times.*, trips.block_id")
                     .joins("JOIN trips ON stop_times.trip_id = trips.trip_id")
