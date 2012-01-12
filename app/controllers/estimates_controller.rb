@@ -41,7 +41,7 @@ class EstimatesController < ApplicationController
         # all the user will care about is which block the vehicle is closest to,
         # so we reassign ("fudge") the block here.
         vehicle_data[:BlockID] = trip.block_id
-        vehicle_data[:TripID] = trip.id
+        vehicle_data[:TripID] = trip.trip_id
 
         # The trip has now been associated with a vehicle, so remove it from the
         # pool.
@@ -207,7 +207,10 @@ class EstimatesController < ApplicationController
     nearest_departure = nil
     lateness = nil
 
+#    puts 'departures'
+
     departures.each do |departure|
+#      puts departure.trip_id
       # get the corresponding trip
       trip_index = trips.index {|t| t.trip_id == departure.trip_id }
       trip = trips[trip_index]
@@ -224,7 +227,10 @@ class EstimatesController < ApplicationController
         nearest_trip = trip
         nearest_departure = departure
       end
+#      puts current_lateness
     end
+
+    puts
 
     if lateness == nil
       return nil, nil, nil
@@ -250,9 +256,6 @@ class EstimatesController < ApplicationController
     # Sometimes the headsign says something other than what you'd expect, like
     # when a route is diverted.  That's also not always helpful.
     # So, here, we use the Direction/direction_id to check direction instead.
-    puts trip.direction_id
-    puts vehicle.vehicle_direction
-    puts
     return (trip.direction_id.to_i == 0 && (vehicle.vehicle_direction == 'SouthBound' || vehicle.vehicle_direction == 'EastBound')) ||
            (trip.direction_id.to_i == 1 && (vehicle.vehicle_direction == 'NorthBound' || vehicle.vehicle_direction == 'WestBound'))
     #####
