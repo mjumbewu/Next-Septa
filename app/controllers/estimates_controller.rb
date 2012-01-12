@@ -252,8 +252,8 @@ class EstimatesController < ApplicationController
     puts trip.direction_id
     puts vehicle.vehicle_direction
     puts
-    return (trip.direction_id.to_i == 0 && (vehicle.vehicle_direction == 'NorthBound' || vehicle.vehicle_direction == 'EastBound')) ||
-           (trip.direction_id.to_i == 1 && (vehicle.vehicle_direction == 'SouthBound' || vehicle.vehicle_direction == 'WestBound'))
+    return (trip.direction_id.to_i == 0 && (vehicle.vehicle_direction == 'SouthBound' || vehicle.vehicle_direction == 'EastBound')) ||
+           (trip.direction_id.to_i == 1 && (vehicle.vehicle_direction == 'NorthBound' || vehicle.vehicle_direction == 'WestBound'))
     #####
   end
 
